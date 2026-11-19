@@ -8,6 +8,24 @@
 > **免责声明**：本项目仅供学习与个人求职辅助使用。自动化操作可能违反目标平台的服务条款，
 > 由此产生的账号风险由使用者自行承担。打招呼默认处于演练模式（`GREET_DRY_RUN=true`，只导航不发消息）。
 
+## 下载成品包
+
+不想搭开发环境？直接下载仓库根目录的 **[JobAgent-win64.zip](JobAgent-win64.zip)**（约 69 MB）：
+解压到任意目录，双击 `JobAgent.exe` 即用——不需要 Python、不需要装浏览器。
+要求 Windows 10/11 64 位 + Edge WebView2 运行时（Win11 与更新过的 Win10 自带）。
+包内 `说明.txt` 有数据位置、演练开关与常见问题；首次启动在页面「模型设置」里填 LLM 三项即可。
+
+## 界面预览
+
+| | |
+|---|---|
+| ![聊天主界面](docs/screenshots/01-chat-empty.png) | ![双栏登录](docs/screenshots/02-boss-login-pane.png) |
+| 聊天主界面：左侧会话进度脊，快捷指令常驻输入栏上方 | 登录时左栏展开内嵌 BOSS直聘 页面，右栏聊天；顶栏可随时收起 |
+| ![取消登录](docs/screenshots/03-login-cancel.png) | ![模型设置](docs/screenshots/04-model-settings.png) |
+| 取消登录后卡片翻篇为「已取消」，可一键重开 | 模型设置：Key 存 Windows 凭据管理器，页面只露末 4 位 |
+| ![岗位卡片](docs/screenshots/05-job-list.png) | |
+| 候选岗位按匹配度排序，勾选后一键「打招呼投递」 | |
+
 ## 架构
 
 ```
