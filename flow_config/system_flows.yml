@@ -1,0 +1,90 @@
+# =====================================================================
+# JobAgent 系统流程
+# =====================================================================
+
+flows:
+  system_task_started:
+    name: 流程开始播报
+    steps:
+      - id: start
+        type: start
+        next: say
+      - id: say
+        type: action
+        action: action_response
+        args:
+          text: "好的，我们先处理求职相关的事项。"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  system_task_resumed:
+    name: 流程恢复播报
+    steps:
+      - id: start
+        type: start
+        next: say
+      - id: say
+        type: action
+        action: action_response
+        args:
+          text: "好的，我们继续刚才的事项。"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  system_task_interrupted:
+    name: 流程中断播报
+    steps:
+      - id: start
+        type: start
+        next: say
+      - id: say
+        type: action
+        action: action_response
+        args:
+          text: "我们先把之前的事项放一放，先处理当前这件事。"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  system_task_canceled:
+    name: 流程取消播报
+    steps:
+      - id: start
+        type: start
+        next: say
+      - id: say
+        type: action
+        action: action_response
+        args:
+          text: "好的，先帮你取消当前事项。"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  system_collect_information:
+    name: 槽位收集
+    description: collect 两阶段的首问播报：response 由 collect 节点注入 context。
+    steps:
+      - id: start
+        type: start
+        next: say
+      - id: say
+        type: action
+        action: action_response
+        args:
+          text: "{{ context.response['text'] }}"
+        next: listen
+      - id: listen
+        type: action
+        action: action_listen
+        args: {}
+        next: end
+      - id: end
+        type: end
+        next: []

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境与缓存
+.venv/
+.uv-cache/
+
+# 环境配置与密钥（.env 本地自建，禁止入库）
+.env
+*.key
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 日志与运行时数据（data/ 同时挡住误落在 jobagent/data/ 的运行时产物）
+*.log
+logs/
+data/
+storage/
+*.db
+*.db-wal
+*.db-shm
+.lock
+
+# Playwright
+playwright-report/
+test-results/
+
+# IDE 与本地工具
+.idea/
+.vscode/
+.codeartsdoer/
+
+# 前端与桌面壳
+node_modules/
+desktop/vendor/
+desktop/out/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/

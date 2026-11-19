@@ -1,0 +1,217 @@
+# =====================================================================
+# JobAgent 业务流程 + slots 槽位定义
+# 规范：
+#       4 类节点 start/collect/action/end，
+#       3 类边：next: 字符串（静态） / - if: expr, then: id（条件） / - else: id（回退）
+# =====================================================================
+
+# ---------- 槽位定义 ----------
+slots:
+  resume_file_ref:
+    type: text
+    label: 简历文件引用
+    description: 上传后的简历文件引用（系统写入）
+  resume_summary:
+    type: text
+    label: 简历摘要
+    description: 解析摘要 JSON（系统写入，卡片渲染）
+  resume_confirmed:
+    type: text
+    label: 简历确认标记
+    description: 用户确认解析结果后写入
+  intent_position:
+    type: text
+    label: 目标岗位
+    description: 期望的岗位方向
+  intent_cities:
+    type: text
+    label: 目标城市
+    description: 期望工作的城市（一次只填一个）
+  intent_salary:
+    type: text
+    label: 期望薪资
+    description: 期望薪资范围（可选，用户主动提到才记录）
+  intent_confirmed:
+    type: text
+    label: 意向确认标记
+    description: 系统写入的门禁标记
+  job_selection:
+    type: text
+    label: 岗位勾选结果
+    description: 用户在岗位列表卡片中勾选的岗位 ID 列表（卡片写入）
+  login_status:
+    type: text
+    label: 登录状态
+    description: action_confirm_login 写入的系统槽（OK；job_list_confirm 门禁消费）
+  login_confirmed:
+    type: text
+    label: 登录完成标记
+    description: 前端轮询检测到登录态后经 login_window 卡片自动预填（值固定「已登录」），confirm_login 收集槽
+
+# ---------- 业务流程（6 个） ----------
+flows:
+  job_intent_collection:
+    name: 求职意向收集
+    description: 收集用户的岗位方向与目标城市，确认后保存求职意向。
+    steps:
+      - id: start
+        type: start
+        next: ask_position
+      - id: ask_position
+        type: collect
+        slot_name: intent_position
+        response:
+          text: "期望的岗位方向是什么？（例如：Python 后端、前端、数据分析）"
+        next: ask_cities
+      - id: ask_cities
+        type: collect
+        slot_name: intent_cities
+        response:
+          text: "目标城市是哪个？（一次只填一个）"
+        validation:
+          condition: "slots.get('intent_cities') and len(slots.get('intent_cities').strip()) >= 2 and ',' not in slots.get('intent_cities') and '，' not in slots.get('intent_cities')"
+          failure_response:
+            text: "一次只填一个城市哦，请回复一个城市名。"
+        next: save_intent
+      - id: save_intent
+        type: action
+        action: action_save_intent
+        args: {}
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  resume_upload_confirm:
+    name: 简历上传解析确认
+    description: 用户上传简历后解析摘要并确认（action_parse_resume 由 OBJECT 卡片消息触发预填 resume_summary）。
+    steps:
+      - id: start
+        type: start
+        next: parse_resume
+      - id: parse_resume
+        type: action
+        action: action_parse_resume
+        args: {}
+        next: ask_confirm
+      - id: ask_confirm
+        type: collect
+        slot_name: resume_confirmed
+        response:
+          text: "简历解析摘要已生成，请确认无误？"
+          choices: ["确认", "重新上传"]
+        validation:
+          condition: "slots.get('resume_confirmed') == '确认'"
+        next: tell_next
+      - id: tell_next
+        type: action
+        action: action_response
+        args:
+          text: "简历已记下。"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  boss_login:
+    depends_on: [job_intent_collection]
+    name: BOSS直聘登录
+    description: 用户在桌面上弹出的浏览器窗口里自己登录（APP 扫码/手机号/密码都行），
+      action_open_login 只负责开窗并立即返回，action_confirm_login 读 profile 的 auth cookie 判定成败；
+      判定成功就把浏览器换成无头（窗口消失）并写 login_status=OK。
+      start 后先做意向门禁（条件边），两个 action 内部各再查一次——双保险。
+
+    restart_on_reentry: true
+    steps:
+      - id: start
+        type: start
+        next:
+          - if: "slots.get('intent_confirmed') == 'yes'"
+            then: do_login
+          - else: need_intent
+      - id: need_intent
+        type: action
+        action: action_response
+        args:
+          text: "请先完成求职意向确认，再来登录 BOSS直聘。"
+        next: end
+      - id: do_login
+        type: action
+        action: action_open_login
+        args: {}
+        next: confirm_login
+      - id: confirm_login
+        type: collect
+        slot_name: login_confirmed
+        response:
+          text: "在弹出的浏览器窗口里完成登录，好了我会自动继续。"
+        validation:
+          condition: "slots.get('login_confirmed')"
+        next: check_login
+      - id: check_login
+        type: action
+        action: action_confirm_login
+        args: {}
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  boss_logout:
+    name: 退出登录
+    description: 一句话退出 BOSS直聘登录：清掉本用户 profile 的 cookie、登录凭证与登录态槽位，
+      不动意向/简历/候选岗。会话超时也会自动走同一套清理。
+    steps:
+      - id: start
+        type: start
+        next: do_logout
+      - id: do_logout
+        type: action
+        action: action_logout
+        args: {}
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  job_list_confirm:
+    depends_on: [job_intent_collection, boss_login]
+    name: 岗位列表确认
+    description: 根据用户意向筛选岗位，并向展示匹配岗位列表，等待用户在卡片中勾选确认。
+    steps:
+      - id: start
+        type: start
+        next: do_search
+      - id: do_search
+        type: action
+        action: action_search_jobs
+        args: {}
+        next: collect_selection
+      - id: collect_selection
+        type: collect
+        slot_name: job_selection
+        response:
+          text: "请在岗位列表卡片中勾选想投递的岗位。"
+        validation:
+          condition: "slots.get('job_selection') and len(slots.get('job_selection')) >= 1"
+        next: end
+      - id: end
+        type: end
+        next: []
+
+  greet_task_flow:
+    depends_on: [job_list_confirm]
+    name: 打招呼任务执行
+    description: 用户在岗位列表勾选确认即视为授权，直接建任务并起后台协程逐岗位沟通；结果由 /api/tasks 汇总回前端，流程本身不追问、不轮询。
+    steps:
+      - id: start
+        type: start
+        next: do_create
+      - id: do_create
+        type: action
+        action: action_send_greet
+        args: {}
+        next: end
+      - id: end
+        type: end
+        next: []

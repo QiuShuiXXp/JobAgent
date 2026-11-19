@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobAgent · 求职副驾</title>
+  <link rel="stylesheet" href="/style.css?v=20261118-choice1">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark">JobAgent</span>
+      <span class="brand__line" aria-hidden="true"></span>
+      <span class="brand__sub">求职副驾</span>
+    </div>
+    <p class="topbar__note">需要登录时会打开 BOSS直聘 页面，登录完不用你关，也别去关它</p>
+    <button v-if="panel && panel.supported" class="topbar__panel" :disabled="!!loginCardId"
+            :title="loginCardId ? '登录完成前请先别收起 BOSS 页面' : '收起/展开左侧 BOSS直聘 页面（收起后页面仍在后台运行）'"
+            @click="togglePanel">{{ panel.presented ? '收起 BOSS 页面' : '展开 BOSS 页面' }}</button>
+    <button class="model" :class="{ 'model--need': needKey }" @click="openSettings">
+      {{ needKey ? '配置模型' : '模型设置' }}
+    </button>
+    <button class="topbar__clear" :disabled="!!pending" title="清空对话与流程进度（意向、简历摘要也要重新来；不会退出登录）"
+            @click="clearHistory">清空会话</button>
+    <span class="session">会话 {{ shortId }}</span>
+  </header>
+
+  <div class="stage">
+    <!-- 左脊：本次会话的投递流水线 -->
+    <aside class="rail" aria-label="本次会话进度">
+      <h2 class="eyebrow">本次会话</h2>
+      <ol class="rail__list">
+        <li v-for="(s, i) in rail" :key="s.key" class="stage-item" :class="'is-' + s.status">
+          <span class="stage-item__marker" :data-i="i + 1">
+            <svg v-if="s.status === 'done'" viewBox="0 0 12 12" class="stage-item__check" aria-hidden="true">
+              <path d="M2.4 6.4 4.8 8.8 9.6 3.6" fill="none" stroke="currentColor" stroke-width="1.6"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <div class="stage-item__text">
+            <strong>{{ s.name }}</strong>
+            <em>{{ s.status === 'done' ? '已完成' : (s.status === 'active' ? s.wait : '待办') }}</em>
+          </div>
+        </li>
+      </ol>
+      <p class="rail__foot">刷新页面会重新开始计数；登录态在 60 分钟无操作后自动登出。</p>
+    </aside>
+
+    <section class="stream">
+      <!-- 没 Key 时整屏只干一件事：把模型接上 -->
+      <setup-card v-if="showSettings" :settings="settings" @saved="settingsSaved"
+                  @close="settingsOpen = false"></setup-card>
+      <template v-else>
+      <!-- 打开页面先看这里：此刻唯一该做的一件事 -->
+      <div class="nextbar" :class="{ 'nextbar--waiting': nextBar.waiting }">
+        <span class="eyebrow">下一步</span>
+        <p>{{ nextBar.text }}</p>
+      </div>
+
+      <main class="thread" ref="thread" aria-live="polite">
+        <div v-if="!messages.length" class="empty">
+          <h2 class="empty__title">把求职这件事交给我</h2>
+          <p class="empty__body">上传简历、说清意向，剩下的筛岗和沟通由我在 BOSS直聘 上替你做完。</p>
+        </div>
+
+        <article v-for="m in messages" :key="m.id" class="msg"
+                 :class="['msg--' + m.role, m.level === 'error' ? 'msg--error' : '']">
+          <span class="msg__who">{{ m.role === 'user' ? '你' : '副驾' }}</span>
+
+          <template v-if="m.kind === 'text'">
+            <div class="bubble">{{ m.text }}</div>
+            <div v-if="m.choices && m.choices.length" class="choices">
+              <button v-for="c in m.choices" :key="c" class="chip-btn" :disabled="!!pending"
+                      @click="pickChoice(m, c)">{{ c }}</button>
+            </div>
+          </template>
+
+          <login-card v-else-if="m.card.type === 'login_window'" :msg="m"
+                      :live="m.id === loginCardId ? loginLive : false"
+                      @confirm="confirmLogin" @reopen="reopenLogin"></login-card>
+          <job-card v-else-if="m.card.type === 'job_list'" :msg="m"
+                    @greet="greetJobs"></job-card>
+          <resume-card v-else-if="m.card.type === 'resume'" :msg="m"></resume-card>
+          <task-card v-else-if="m.card.type === 'task_report'" :msg="m" :live="tasks[m.card.id]"></task-card>
+          <generic-card v-else :msg="m"></generic-card>
+
+          <button v-if="m.failed" class="retry" @click="resend(m)">重发这条</button>
+        </article>
+
+        <div v-if="pending" class="msg msg--bot pending">
+          <span class="msg__who">副驾</span>
+          <div class="pending__body">
+            <span class="eyebrow pending__label">执行中 · {{ pending.label }}</span>
+            <span class="pending__bar" aria-hidden="true"><i></i></span>
+            <span class="pending__time">{{ pendingSeconds }}s</span>
+          </div>
+        </div>
+      </main>
+
+      <div class="quickbar" aria-label="快捷指令">
+        <button v-for="s in openers" :key="s" class="chip-btn" :disabled="!!pending"
+                @click="say(s)">{{ s }}</button>
+      </div>
+      <footer class="composer">
+        <label class="upload">
+          <input type="file" ref="file" accept=".pdf,.docx,.doc" @change="uploadResume">
+          <span>上传简历</span>
+        </label>
+        <input class="input" v-model.trim="draft" type="text" autocomplete="off"
+               :disabled="!!pending" placeholder="说说你的求职意向，或输入任何指令…"
+               @keydown.enter.prevent="send">
+        <button class="send" :disabled="!draft || !!pending" @click="send">发送</button>
+      </footer>
+      </template>
+    </section>
+  </div>
+</div>
+
+<!-- ── 组件模板 ───────────────────────────────────────────────── -->
+<script type="text/x-template" id="tpl-setup-card">
+  <section class="setup">
+    <div class="setup__card">
+      <p class="eyebrow" :class="locked ? 'eyebrow--amber' : ''">{{ locked ? '第一步' : '模型设置' }}</p>
+      <h2 class="setup__title">{{ locked ? '先接上你的 AI 服务' : '换一家模型服务' }}</h2>
+      <p class="setup__lede">
+        {{ locked ? '没有 Key，副驾只能看着你：简历解析、意向理解、岗位匹配都要调模型。'
+                  : '改完立即生效，不用重启。API Key 留空表示保留现在这把。' }}
+      </p>
+
+      <label class="field">
+        <span class="field__label">API Key</span>
+        <input class="field__input" :type="reveal ? 'text' : 'password'" v-model.trim="api_key"
+               :placeholder="hintKey" autocomplete="off" spellcheck="false"
+               @keydown.enter.prevent="save">
+        <button v-if="!locked" type="button" class="field__ghost" @click="reveal = !reveal">
+          {{ reveal ? '隐藏' : '显示' }}
+        </button>
+      </label>
+      <label class="field">
+        <span class="field__label">接口地址</span>
+        <input class="field__input" type="text" v-model.trim="base_url"
+               placeholder="留空走官方地址 https://api.openai.com/v1" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span class="field__label">模型名</span>
+        <input class="field__input" type="text" v-model.trim="model"
+               :placeholder="settings.llm_model || 'gpt-4o-mini'" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span class="field__label">联网搜索 Key（选填）</span>
+        <input class="field__input" :type="revealSearch ? 'text' : 'password'" v-model.trim="search_key"
+               :placeholder="hintSearchKey" autocomplete="off" spellcheck="false"
+               @keydown.enter.prevent="save">
+        <button v-if="settings.search_key_set" type="button" class="field__ghost"
+                @click="revealSearch = !revealSearch">
+          {{ revealSearch ? '隐藏' : '显示' }}
+        </button>
+      </label>
+
+      <p v-if="error" class="setup__error">{{ error }}</p>
+      <p v-else-if="saved" class="setup__ok">{{ saved }}</p>
+
+      <div class="setup__foot">
+        <button class="btn btn--primary" :disabled="!dirty || busy" @click="save">
+          {{ busy ? '保存中…' : '保存' }}
+        </button>
+        <button v-if="!locked" class="btn" @click="$emit('close')">返回会话</button>
+      </div>
+      <p class="setup__note">
+        Key 只写进这台电脑的{{ settings.desktop ? ' Windows 凭据管理器' : ' .env' }}，
+        页面与日志里都只出现末 4 位。联网搜索 Key 是百度千帆那把，用来查公司口碑这类
+        公开信息；不填也能正常用，只是问到这类问题时副驾只能说没查到。
+      </p>
+    </div>
+  </section>
+</script>
+
+<script type="text/x-template" id="tpl-login-card">
+  <div class="card card--login">
+    <div class="card__head">
+      <h3>登录 BOSS直聘</h3>
+      <span class="eyebrow" :class="phase === 'done' ? '' : 'eyebrow--amber'">{{ phaseLabel }}</span>
+    </div>
+    <p class="login__line">
+      <span class="login__dot" :class="'login__dot--' + phase" aria-hidden="true"></span>{{ line }}
+    </p>
+    <button v-if="phase === 'closed' || phase === 'stale' || phase === 'canceled'" class="btn btn--primary"
+            @click="$emit('reopen')">打开登录页</button>
+  </div>
+</script>
+
+<script type="text/x-template" id="tpl-job-card">
+  <div class="card card--jobs">
+    <div class="card__head">
+      <h3>候选岗位 <span class="card__sort">按匹配度排序</span></h3>
+      <span class="eyebrow">{{ picked.length }} / {{ jobs.length }} 已选</span>
+    </div>
+    <ul class="jobs">
+      <li v-for="j in jobs" :key="j.id" class="job" :class="{ 'is-picked': on(j.id) }"
+          @click.prevent="toggle(j.id)">
+        <label class="job__row">
+          <input type="checkbox" :value="j.id" v-model="picked" @click.stop>
+          <span class="job__main">
+            <span class="job__title">{{ j.title }}</span>
+            <span class="job__company">{{ j.company }} · {{ j.city }}</span>
+          </span>
+          <span class="job__meta">
+            <span class="job__salary">{{ j.salary }}</span>
+            <span class="job__score" :title="'匹配度 ' + Math.round(j.score * 100) + '%'">
+              <span class="job__score-track"><i :style="{ width: Math.max(6, j.score * 100) + '%' }"></i></span>
+              <em>{{ Math.round(j.score * 100) }}%</em>
+            </span>
+          </span>
+        </label>
+      </li>
+    </ul>
+    <div class="card__foot">
+      <button class="btn btn--primary" :disabled="!picked.length" @click="$emit('greet', picked.slice())">
+        打招呼投递
+      </button>
+    </div>
+    <p class="card__hint card__hint--split" v-if="!picked.length">先勾出你想投的岗位，按钮才会点亮。</p>
+  </div>
+</script>
+
+<script type="text/x-template" id="tpl-resume-card">
+  <div class="card card--resume">
+    <div class="card__head">
+      <h3>简历解析摘要</h3>
+      <span class="eyebrow">{{ s.name || '未检出姓名' }}</span>
+    </div>
+    <dl class="facts">
+      <div v-for="f in facts" :key="f.k" class="facts__row">
+        <dt>{{ f.k }}</dt>
+        <dd>{{ f.v }}</dd>
+      </div>
+    </dl>
+    <p class="card__hint">点下方「确认」采用这份摘要；不对就点「重新上传」换一份。</p>
+  </div>
+</script>
+
+<script type="text/x-template" id="tpl-task-card">
+  <div class="card card--task">
+    <div class="card__head">
+      <h3>{{ head }}</h3>
+      <span class="eyebrow" :class="dryRun ? 'eyebrow--amber' : 'eyebrow--rust'">
+        {{ dryRun ? '演练模式' : '真实发送' }}
+      </span>
+    </div>
+    <div class="ticks" role="img" :aria-label="summary">
+      <i v-for="it in items" :key="it.job_id" class="tick" :class="'tick--' + it.kind"></i>
+    </div>
+    <p class="card__hint">{{ summary }}</p>
+    <ul v-if="failures.length" class="failures">
+      <li v-for="f in failures" :key="f.job_id">
+        <span class="failures__title">{{ f.title || f.job_id }}</span>
+        <span class="failures__why">{{ f.failure_reason }}</span>
+      </li>
+    </ul>
+    <p v-if="failures.length" class="card__hint">这些我不会自动重试：重新筛岗，勾选后再投一次。</p>
+  </div>
+</script>
+
+<script type="text/x-template" id="tpl-generic-card">
+  <div class="card">
+    <div class="card__head"><h3>{{ type }}</h3></div>
+    <pre class="raw">{{ raw }}</pre>
+  </div>
+</script>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/chat.js?v=20261118-choice1"></script>
+</body>
+</html>

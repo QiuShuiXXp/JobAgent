@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>JobAgent 启动失败</title>
+<style>
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         background:#EDF0F2; color:#1B2225; font:15px/1.65 "Microsoft YaHei",sans-serif; }
+  .card { max-width:520px; padding:36px 40px; background:#fff;
+          border:1px solid #DDE2E5; border-left:3px solid #A6402F; }
+  h1 { margin:0 0 6px; font-size:19px; }
+  .eyebrow { margin:0 0 14px; font:12px/1 "IBM Plex Mono",monospace;
+             letter-spacing:.08em; text-transform:uppercase; color:#A6402F; }
+  ol { margin:16px 0 0; padding-left:20px; color:#3A4448; }
+  li { margin-bottom:8px; }
+  code { font-family:"IBM Plex Mono",Consolas,monospace; font-size:13px;
+         background:#F2F5F6; padding:1px 5px; }
+  button { margin-top:24px; padding:9px 22px; font:inherit; cursor:pointer;
+           color:#fff; background:#0F5F57; border:0; }
+  .tip { margin:12px 0 0; min-height:22px; font-size:13px; color:#A6402F; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">Backend unavailable</p>
+    <h1>后端 60 秒内没能起来</h1>
+    <p>窗口这里停一下，先把话说清楚：进程拉起失败或端口没通，多半是这三件事之一。</p>
+    <ol>
+      <li>看日志：<code>%LOCALAPPDATA%\JobAgent\logs\jobagent.log</code></li>
+      <li>第一次启动会自己建运行目录和配置文件，<b>不需要</b>先跑初始化脚本</li>
+      <li>缺 <code>LLM_API_KEY</code> 不影响启动：进页面后在「模型设置」里填</li>
+      <li>还是起不来一般是 <code>%LOCALAPPDATA%\JobAgent</code> 不可写，或仓库没跑过 <code>uv sync</code></li>
+    </ol>
+    <button id="retry">重新连接</button>
+    <p id="tip" class="tip"></p>
+  </main>
+<script>
+  // 壳不会重新拉起后端，所以这里只能探端口：用户在另一个终端修好后点一下就能进应用
+  const BACKEND = "http://127.0.0.1:8712/";
+  const tip = document.getElementById("tip");
+  document.getElementById("retry").addEventListener("click", async () => {
+    tip.textContent = "正在连接…";
+    try {
+      await fetch(BACKEND, { mode: "no-cors", cache: "no-store" });
+      location.href = BACKEND;
+    } catch {
+      tip.textContent = "后端仍未响应。它是由壳拉起的，进程退出后请重新打开 JobAgent。";
+    }
+  });
+</script>
+</body>
+</html>
